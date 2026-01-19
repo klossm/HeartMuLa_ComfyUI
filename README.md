@@ -48,7 +48,7 @@ pip install -r requirements.txt
 ------------------------------------------------------------
 Go to ComfyUI/models 
 
-Use HuggingFace Cli donwload model weigths.
+Use HuggingFace Cli download model weights.
 
 type :
 
