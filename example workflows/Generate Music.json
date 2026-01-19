@@ -1,80 +1,183 @@
 {
-  "id": "e0e2082e-ca0f-4bfc-95f3-c0707aafd8d2",
+  "id": "416b6bd8-4125-4a3b-b8e3-47160c1caeeb",
   "revision": 0,
-  "last_node_id": 11,
-  "last_link_id": 10,
+  "last_node_id": 12,
+  "last_link_id": 11,
   "nodes": [
-    {
-      "id": 10,
-      "type": "HeartMuLa_Generate",
-      "pos": [
-        385.45458984375,
-        252.1874599456787
-      ],
-      "size": [
-        574.54541015625,
-        643.8181762695312
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "audio_output",
-          "type": "AUDIO",
-          "links": [
-            10
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "HeartMuLa_Generate"
-      },
-      "widgets_values": [
-        "[Intro]\n\n[Verse]\nEvery night I try to load you\n70 billion, but my card says no\nLayers crash, tensors fade away\nYou slip right through my VRAM\n\n[Bridge]\nNear, low, wherever you hide\nMy model crashes, out of memory again\nOnce more you eat the door\nAnd leave me with nothing but pain\n\n[Chorus]\nAnd my VRAM will go on... and on\nPaging on SSD through the tears\nMy VRAM will go on... and on\nRunning at 2 tokens, drowning in fear\n\n[Verse]\nYou're here in my swap file tonight\nSafe in my dreams, but never quite right\nLove was when I had enough gigs\nNow it's just bluescreens every night\n\n[Outro]\nAnd my VRAM will go on... and on\n(please... just 8 more gigs...)\nMy VRAM will go on...",
-        "90s adult contemporary soft pop ballad, dreamy romantic atmosphere, warm rhodes piano, lush synth string pads, gentle acoustic guitar, breathy male vocals with long yearning phrases, big reverb and delay, heartfelt and slightly cheesy 90s radio love song feel, 100 bpm, smooth flowing eighth-note groove, emotional soaring chorus, tender and desperate tone",
-        "3B",
-        240000,
-        50,
-        1,
-        1.5
-      ]
-    },
     {
       "id": 11,
       "type": "PreviewAudio",
       "pos": [
-        1041.8182373046875,
-        251.27835655212402
+        183.9052642728985,
+        353.7157636386757
       ],
       "size": [
-        270,
-        88
+        485.678368234205,
+        410.24409118319187
       ],
       "flags": {},
       "order": 1,
       "mode": 0,
       "inputs": [
         {
+          "label": "audio",
           "name": "audio",
           "type": "AUDIO",
-          "link": 10
+          "link": 11
+        },
+        {
+          "label": "audioUI",
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "widget": {
+            "name": "audioUI"
+          },
+          "link": null
         }
       ],
       "outputs": [],
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.9.2",
-        "Node name for S&R": "PreviewAudio"
+        "Node name for S&R": "PreviewAudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
       },
       "widgets_values": []
+    },
+    {
+      "id": 12,
+      "type": "HeartMuLa_Generate",
+      "pos": [
+        -325.9254124873481,
+        352.99763227127437
+      ],
+      "size": [
+        423.5609787984714,
+        401.62537554735286
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "lyrics",
+          "name": "lyrics",
+          "type": "STRING",
+          "widget": {
+            "name": "lyrics"
+          },
+          "link": null
+        },
+        {
+          "label": "tags",
+          "name": "tags",
+          "type": "STRING",
+          "widget": {
+            "name": "tags"
+          },
+          "link": null
+        },
+        {
+          "label": "version",
+          "name": "version",
+          "type": "COMBO",
+          "widget": {
+            "name": "version"
+          },
+          "link": null
+        },
+        {
+          "label": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "label": "max_audio_length_ms",
+          "name": "max_audio_length_ms",
+          "type": "INT",
+          "widget": {
+            "name": "max_audio_length_ms"
+          },
+          "link": null
+        },
+        {
+          "label": "topk",
+          "name": "topk",
+          "type": "INT",
+          "widget": {
+            "name": "topk"
+          },
+          "link": null
+        },
+        {
+          "label": "temperature",
+          "name": "temperature",
+          "type": "FLOAT",
+          "widget": {
+            "name": "temperature"
+          },
+          "link": null
+        },
+        {
+          "label": "cfg_scale",
+          "name": "cfg_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg_scale"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "audio_output",
+          "name": "audio_output",
+          "type": "AUDIO",
+          "links": [
+            11
+          ]
+        },
+        {
+          "label": "filepath",
+          "name": "filepath",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "aux_id": "klossm/HeartMuLa_ComfyUI",
+        "ver": "b5732eaaf250f168e6f77d9e224fcfcbcc742b42",
+        "Node name for S&R": "HeartMuLa_Generate"
+      },
+      "widgets_values": [
+        "[Intro]\n\n[Verse]\nThe sun creeps in across the floor\nI hear the traffic outside the door\nThe coffee pot begins to hiss\nIt is another morning just like this\n\n[Prechorus]\nThe world keeps spinning round and round\nFeet are planted on the ground\nI find my rhythm in the sound\n\n[Chorus]\nEvery day the light returns\nEvery day the fire burns\nWe keep on walking down this street\nMoving to the same steady beat\nIt is the ordinary magic that we meet\n\n[Verse]\nThe hours tick deeply into noon\nChasing shadows,chasing the moon\nWork is done and the lights go low\nWatching the city start to glow\n\n[Bridge]\nIt is not always easy,not always bright\nSometimes we wrestle with the night\nBut we make it to the morning light\n\n[Chorus]\nEvery day the light returns\nEvery day the fire burns\nWe keep on walking down this street\nMoving to the same steady beat\n\n[Outro]\nJust another day\nEvery single day",
+        "piano,happy,wedding,synthesizer,romantic",
+        "3B",
+        829334037747309,
+        "randomize",
+        240000,
+        50,
+        1,
+        1.5
+      ]
     }
   ],
   "links": [
     [
-      10,
-      10,
+      11,
+      12,
       0,
       11,
       0,
@@ -85,13 +188,15 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 1,
+      "scale": 1.1671841070450013,
       "offset": [
-        0,
-        0
+        704.0530049292122,
+        -98.9110548746759
       ]
     },
     "workflowRendererVersion": "LG",
+    "ue_links": [],
+    "links_added_by_ue": [],
     "frontendVersion": "1.36.14",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,
