@@ -25,7 +25,9 @@ We are not providing service here, we are group of hobbiests, developers who wan
 **Update:**
 
 ------------------------------------------------------------
-
+2026-01-21 (3)
+- Precise Temperature: Refined temperature step to 0.01 for more granular control over generation.
+- Intuitive Audio Length: Renamed parameter to max_audio_length_seconds (Default: 240s) for better usability.
 
 2026-01-21 (2) 
 - Lazy Load Optimization , now able to load with 12GB VRAM.  
