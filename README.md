@@ -28,6 +28,12 @@ We are not providing service here, we are group of hobbiests, developers who wan
 - Integrated Native Progress Bar: Replaced tqdm with comfy.utils.ProgressBar for real-time progress tracking in the UI.
 - Precise Temperature: Refined temperature step to 0.01 for more granular control over generation.
 - Intuitive Audio Length: Renamed parameter to max_audio_length_seconds (Default: 240s) for better usability.
+- Keep Model Loaded(Memory Settings):
+True: Keep model in VRAM for instant subsequent generations.
+False: Unload model after each task to free up memory.
+- Offload Mode:
+Auto: Standard memory release for balanced performance.
+Aggressive: Full VRAM wipe + Garbage Collection. 
 
 2026-01-21 (2) 
 - Lazy Load Optimization , now able to load with 12GB VRAM.  
