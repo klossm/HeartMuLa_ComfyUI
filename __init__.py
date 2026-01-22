@@ -23,6 +23,7 @@ if util_dir not in sys.path:
     sys.path.insert(0, util_dir)
 
 folder_paths.add_model_folder_path("HeartMuLa", os.path.join(folder_paths.models_dir, "HeartMuLa"))
+folder_paths.add_model_folder_path("HeartMuLa", os.path.join(current_dir, "util", "heartlib", "ckpt"))
 
 def get_model_base_dir():
     paths = folder_paths.get_folder_paths("HeartMuLa")

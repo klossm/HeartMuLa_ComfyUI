@@ -19,8 +19,16 @@ try:
     import folder_paths
 except ImportError:
     class FolderPaths:
+        def __init__(self):
+            self.models_dir = "models"
+            self._paths = {}
         def get_output_directory(self): return "output"
         def get_temp_directory(self): return "temp"
+        def add_model_folder_path(self, name, path):
+            if name not in self._paths: self._paths[name] = []
+            self._paths[name].append(path)
+        def get_folder_paths(self, name):
+            return self._paths.get(name, [name])
     sys.modules["folder_paths"] = FolderPaths()
 
 # Import Manager
