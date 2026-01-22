@@ -47,9 +47,19 @@ class HeartMuLaModelManager:
             
             bnb_config = None
             if quantize_4bit:
+                quant_type = "nf4"
+                if torch.cuda.is_available():
+                    try:
+                        major, _ = torch.cuda.get_device_capability()
+                        if major >= 10:
+                            quant_type = "fp4"
+                            print(f"HeartMuLa: Detected Blackwell GPU (Compute {major}.x), using native FP4 quantization.")
+                    except:
+                        pass
+
                 bnb_config = BitsAndBytesConfig(
                     load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_quant_type=quant_type,
                     bnb_4bit_compute_dtype=torch.bfloat16,
                     bnb_4bit_use_double_quant=True,
                 )
