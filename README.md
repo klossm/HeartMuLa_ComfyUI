@@ -35,6 +35,9 @@ We are not providing service here, we are group of hobbiests, developers who wan
 **Update:**
 
 ------------------------------------------------------------
+2026-01-22 (2) :
+thank you [@zboyles](https://github.com/zboyles) for making this custom node support Apple M-series!
+
 2026-01-22 :
 Feature: 4-bit Quantization (FP4/NF4) with Native Blackwell Detection
 Thank you <a href="https://github.com/IuraHD">IuraHD</a> update!
