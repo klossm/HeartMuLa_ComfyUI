@@ -1,10 +1,12 @@
+import math
+
+import numpy as np
 import torch
+from transformers.modeling_utils import PreTrainedModel
+
+from .configuration_heartcodec import HeartCodecConfig
 from .models.flow_matching import FlowMatching
 from .models.sq_codec import ScalarModel
-from .configuration_heartcodec import HeartCodecConfig
-from transformers.modeling_utils import PreTrainedModel
-import math
-import numpy as np
 
 
 class HeartCodec(PreTrainedModel):
@@ -62,22 +64,26 @@ class HeartCodec(PreTrainedModel):
         num_steps=10,
         disable_progress=False,
         guidance_scale=1.25,
-        device="cuda",
+        device=None,
     ):
         # 1. 自动获取模型当前的精度 (例如 bfloat16)
         target_dtype = next(self.parameters()).dtype
-        
+
+        # Infer device from model parameters if not specified
+        if device is None:
+            device = next(self.parameters()).device
+
         codes = codes.unsqueeze(0).to(device)
-        
+
         # 2. 修复：创建随机张量时显式指定 dtype，防止 FP32 与 BF16 冲突
         first_latent = torch.randn(
-            codes.shape[0], 
-            int(duration * 25), 
-            256, 
-            device=device, 
+            codes.shape[0],
+            int(duration * 25),
+            256,
+            device=device,
             dtype=target_dtype
         )
-        
+
         first_latent_length = 0
         first_latent_codes_length = 0
         min_samples = int(duration * 12.5)
@@ -126,7 +132,7 @@ class HeartCodec(PreTrainedModel):
                 true_latent = latent_list[-1][:, -ovlp_frames:, :]
                 len_add_to_latent = latent_length - true_latent.shape[1]
                 incontext_length = true_latent.shape[1]
-                
+
                 # 3. 修复：这里的随机噪声也要指定 dtype
                 noise = torch.randn(
                     true_latent.shape[0],
@@ -135,7 +141,7 @@ class HeartCodec(PreTrainedModel):
                     device=device,
                     dtype=target_dtype
                 )
-                
+
                 true_latent = torch.cat(
                     [
                         true_latent,
@@ -194,12 +200,12 @@ class HeartCodec(PreTrainedModel):
                         + cur_output[:, 0:ovlp_samples] * ov_win[:, 0:ovlp_samples]
                     )
                     output = torch.cat([output, cur_output[:, ovlp_samples:]], -1)
-        
+
         # 截断到目标长度
         output = output[:, 0:target_len]
-        
+
         # 5. 核心修复：将最终音频转换回 float32，否则写入 wav 文件会报错
         if isinstance(output, torch.Tensor):
             output = output.to(torch.float32)
-            
+
         return output
