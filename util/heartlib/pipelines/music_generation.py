@@ -111,7 +111,7 @@ class HeartMuLaGenPipeline:
             "pos": _cfg_cat(torch.arange(prompt_len, dtype=torch.long, device=self.device)),
         }
 
-    def _forward(self, model_inputs: Dict[str, Any], max_audio_length_ms: int, temperature: float, topk: int, topp: float, cfg_scale: float, use_cfg_rescale: bool = True, min_p: float = 0.05):
+    def _forward(self, model_inputs: Dict[str, Any], max_audio_length_ms: int, temperature: float, topk: int, topp: float, cfg_scale: float, use_cfg_rescale: bool = True, cfg_rescale_factor: float = 0.7, min_p: float = 0.05):
         self.load_heartmula()
         self.model.setup_caches(2 if cfg_scale != 1.0 else 1)
         
@@ -128,7 +128,7 @@ class HeartMuLaGenPipeline:
                 input_pos=model_inputs["pos"], temperature=temperature, topk=topk, topp=topp,
                 cfg_scale=start_cfg, 
                 use_cfg_rescale=use_cfg_rescale,
-                cfg_rescale_factor=0.7,
+                cfg_rescale_factor=cfg_rescale_factor,
                 min_p=min_p,
                 continuous_segments=model_inputs["muq_embed"], starts=model_inputs["muq_idx"],
             )
@@ -151,7 +151,7 @@ class HeartMuLaGenPipeline:
                     temperature=temperature, topk=topk, topp=topp, 
                     cfg_scale=current_cfg,
                     use_cfg_rescale=use_cfg_rescale,
-                    cfg_rescale_factor=0.7,
+                    cfg_rescale_factor=cfg_rescale_factor,
                     min_p=min_p,
                 )
             
@@ -209,6 +209,7 @@ class HeartMuLaGenPipeline:
         keep_model_loaded = kwargs.get("keep_model_loaded", True)
         offload_mode = kwargs.get("offload_mode", "auto")
         use_cfg_rescale = kwargs.get("use_cfg_rescale", True)
+        cfg_rescale_factor = kwargs.get("cfg_rescale_factor", 0.7)
         min_p = kwargs.get("min_p", 0.05)
         
         model_inputs = self.preprocess(inputs, cfg_scale=kwargs.get("cfg_scale", 1.5))
@@ -219,6 +220,7 @@ class HeartMuLaGenPipeline:
                                topp=kwargs.get("topp", 0.85),
                                cfg_scale=kwargs.get("cfg_scale", 1.5),
                                use_cfg_rescale=use_cfg_rescale,
+                               cfg_rescale_factor=cfg_rescale_factor,
                                min_p=min_p)
         self.postprocess(frames, kwargs.get("save_path", "out.wav"), keep_model_loaded, offload_mode)
 

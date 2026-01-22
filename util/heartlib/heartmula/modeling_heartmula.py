@@ -4,65 +4,36 @@ from .configuration_heartmula import HeartMuLaConfig
 from transformers.modeling_utils import PreTrainedModel
 import torchtune
 from torchtune.models import llama3_2
+import math
+
+# --- Llama 3.2 Definitions ---
 
 def llama3_2_3B():
     return llama3_2.llama3_2(
-        vocab_size=128256,
-        num_layers=28,
-        num_heads=24,
-        num_kv_heads=8,
-        embed_dim=3072,
-        max_seq_len=8192,
-        intermediate_dim=8192,
-        attn_dropout=0.0,
-        norm_eps=1e-5,
-        rope_base=500000,
-        scale_factor=32,
+        vocab_size=128256, num_layers=28, num_heads=24, num_kv_heads=8,
+        embed_dim=3072, max_seq_len=8192, intermediate_dim=8192,
+        attn_dropout=0.0, norm_eps=1e-5, rope_base=500000, scale_factor=32,
     )
 
 def llama3_2_300M():
     return llama3_2.llama3_2(
-        vocab_size=128256,
-        num_layers=3,
-        num_heads=8,
-        num_kv_heads=4,
-        embed_dim=3072,
-        max_seq_len=2048,
-        intermediate_dim=8192,
-        attn_dropout=0.0,
-        norm_eps=1e-5,
-        rope_base=500000,
-        scale_factor=32,
+        vocab_size=128256, num_layers=3, num_heads=8, num_kv_heads=4,
+        embed_dim=3072, max_seq_len=2048, intermediate_dim=8192,
+        attn_dropout=0.0, norm_eps=1e-5, rope_base=500000, scale_factor=32,
     )
 
 def llama3_2_7B():
     return llama3_2.llama3_2(
-        vocab_size=128256,
-        num_layers=32,
-        num_heads=32,
-        num_kv_heads=8,
-        embed_dim=4096,
-        max_seq_len=8192,
-        intermediate_dim=14336,
-        attn_dropout=0.0,
-        norm_eps=1e-5,
-        rope_base=500000,
-        scale_factor=32,
+        vocab_size=128256, num_layers=32, num_heads=32, num_kv_heads=8,
+        embed_dim=4096, max_seq_len=8192, intermediate_dim=14336,
+        attn_dropout=0.0, norm_eps=1e-5, rope_base=500000, scale_factor=32,
     )
 
 def llama3_2_400M():
     return llama3_2.llama3_2(
-        vocab_size=128256,
-        num_layers=4,
-        num_heads=8,
-        num_kv_heads=4,
-        embed_dim=3072,
-        max_seq_len=2048,
-        intermediate_dim=8192,
-        attn_dropout=0.0,
-        norm_eps=1e-5,
-        rope_base=500000,
-        scale_factor=32,
+        vocab_size=128256, num_layers=4, num_heads=8, num_kv_heads=4,
+        embed_dim=3072, max_seq_len=2048, intermediate_dim=8192,
+        attn_dropout=0.0, norm_eps=1e-5, rope_base=500000, scale_factor=32,
     )
 
 FLAVORS = {
@@ -73,6 +44,8 @@ FLAVORS = {
     "llama3_2_3b": llama3_2_3B,
     "llama3_2_1b": llama3_2_400M,
 }
+
+# --- Helper Functions ---
 
 def _prepare_transformer(model):
     embed_dim = model.tok_embeddings.embedding_dim
@@ -91,32 +64,45 @@ def _multinomial_sample_one_no_sync(probs):
     return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
 
 def sample_music(logits: torch.Tensor, topk: int, topp: float, min_p: float, temperature: float):
-    logits = logits / max(temperature, 1e-5)
+    # 0. Temperature Scaling
+    if temperature != 1.0:
+        logits = logits / max(temperature, 1e-5)
     
-    # 1. Min-P Filter
+    # 1. Min-P Filter (Logit Space Optimization)
+    # P(x) < P_max * MinP  <=>  logit(x) < logit_max + log(MinP)
     if min_p > 0.0:
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        max_prob = torch.max(probs, dim=-1, keepdim=True)[0]
-        update_mask = probs < (max_prob * min_p)
-        logits = logits.masked_fill(update_mask, -float("Inf"))
+        max_logits = torch.max(logits, dim=-1, keepdim=True)[0]
+        min_p_log = math.log(min_p)
+        limit = max_logits + min_p_log
+        logits = torch.where(logits < limit, torch.tensor(-float('Inf'), device=logits.device, dtype=logits.dtype), logits)
 
     # 2. Top-K Filter
     if topk > 0:
-        indices_to_remove = logits < torch.topk(logits, topk)[0][..., -1, None]
-        logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+        topk = min(topk, logits.size(-1))  # Safety check
+        v, _ = torch.topk(logits, topk)
+        pivot = v[..., -1, None]
+        logits = torch.where(logits < pivot, torch.tensor(-float('Inf'), device=logits.device, dtype=logits.dtype), logits)
     
     # 3. Top-P Filter
     if topp < 1.0:
         sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-        cumulative_probs = torch.nn.functional.softmax(sorted_logits, dim=-1).cumsum(dim=-1)
+        cumulative_probs = torch.softmax(sorted_logits, dim=-1).cumsum(dim=-1)
+        
+        # Remove tokens with cumulative probability above the threshold (token with 0 is kept)
         sorted_indices_to_remove = cumulative_probs > topp
+        
+        # Shift the indices to the right to keep also the first token above the threshold
         sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
         sorted_indices_to_remove[..., 0] = 0
+        
+        # Scatter sorted tensors to original indexing
         indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
         logits = logits.masked_fill(indices_to_remove, -float("Inf"))
         
-    probs = torch.nn.functional.softmax(logits, dim=-1)
+    probs = torch.softmax(logits, dim=-1)
     return _multinomial_sample_one_no_sync(probs)
+
+# --- Model Class ---
 
 class HeartMuLa(PreTrainedModel):
     config_class = HeartMuLaConfig
@@ -148,13 +134,48 @@ class HeartMuLa(PreTrainedModel):
         self.register_buffer("backbone_causal_mask", _create_causal_mask(self.backbone.max_seq_len, device), persistent=False)
         self.register_buffer("decoder_causal_mask", _create_causal_mask(self.config.audio_num_codebooks, device), persistent=False)
 
+    def _process_logits_and_sample(self, logits, b, cfg_scale, use_cfg_rescale, cfg_rescale_factor, topk, topp, min_p, temperature):
+        """
+        Helper method to handle CFG mixing, rescaling, and sampling.
+        This unifies the logic for both backbone and decoder codebooks.
+        """
+        if cfg_scale > 1.0 and b > 1:
+            actual_B = b // 2
+            cond_logits = logits[:actual_B]
+            uncond_logits = logits[actual_B:]
+            
+            # Classifier-Free Guidance
+            guided_logits = uncond_logits + (cond_logits - uncond_logits) * cfg_scale
+            
+            # CFG Rescale
+            if use_cfg_rescale:
+                std_cond = cond_logits.std(dim=-1, keepdim=True)
+                std_cfg = guided_logits.std(dim=-1, keepdim=True)
+                # Avoid division by zero with eps
+                factor = std_cond / (std_cfg + 1e-6) 
+                rescaled_logits = guided_logits * factor
+                
+                # Linear interpolation between rescaled and guided logits
+                guided_logits = cfg_rescale_factor * rescaled_logits + (1.0 - cfg_rescale_factor) * guided_logits
+            
+            # Sample and duplicate for next step batch consistency
+            sample = sample_music(guided_logits, topk, topp, min_p, temperature).repeat(2, 1)
+        else:
+            sample = sample_music(logits, topk, topp, min_p, temperature)
+            
+        return sample
+
     def generate_frame(self, tokens, tokens_mask, input_pos, temperature, topk, topp, cfg_scale, min_p=0.05, use_cfg_rescale=True, cfg_rescale_factor=0.7, continuous_segments=None, starts=None):
         b, s, _ = tokens.size()
         curr_backbone_mask = _index_causal_mask(self.backbone_causal_mask, input_pos)
+        
         uncond_mask = None
         if cfg_scale > 1.0 and b > 1:
             actual_B = b // 2
-            uncond_mask = torch.cat([torch.zeros(actual_B, dtype=torch.bool, device=tokens.device), torch.ones(actual_B, dtype=torch.bool, device=tokens.device)])
+            uncond_mask = torch.cat([
+                torch.zeros(actual_B, dtype=torch.bool, device=tokens.device), 
+                torch.ones(actual_B, dtype=torch.bool, device=tokens.device)
+            ])
         
         embeds = self._embed_tokens(tokens, uncond_mask=uncond_mask)
         h = (embeds * tokens_mask.unsqueeze(-1)).sum(dim=2, dtype=embeds.dtype)
@@ -170,21 +191,11 @@ class HeartMuLa(PreTrainedModel):
         last_h = h[:, -1, :]
         c0_logits = self.codebook0_head(last_h)
         
-        if cfg_scale > 1.0 and b > 1:
-            actual_B = b // 2
-            cond_logits = c0_logits[:actual_B]
-            uncond_logits = c0_logits[actual_B:]
-            guided_logits = uncond_logits + (cond_logits - uncond_logits) * cfg_scale
-            
-            if use_cfg_rescale:
-                std_cond = cond_logits.std(dim=-1, keepdim=True)
-                std_cfg = guided_logits.std(dim=-1, keepdim=True)
-                rescaled_logits = guided_logits * (std_cond / (std_cfg + 1e-5))
-                guided_logits = cfg_rescale_factor * rescaled_logits + (1.0 - cfg_rescale_factor) * guided_logits
-            
-            c0_sample = sample_music(guided_logits, topk, topp, min_p, temperature).repeat(2, 1)
-        else:
-            c0_sample = sample_music(c0_logits, topk, topp, min_p, temperature)
+        # --- Codebook 0 Sampling (Backbone) ---
+        c0_sample = self._process_logits_and_sample(
+            c0_logits, b, cfg_scale, use_cfg_rescale, cfg_rescale_factor, 
+            topk, topp, min_p, temperature
+        )
             
         c0_embed = self._embed_audio(0, c0_sample)
         self.decoder.reset_caches()
@@ -192,27 +203,21 @@ class HeartMuLa(PreTrainedModel):
         curr_sample = c0_sample.clone()
         curr_pos = torch.arange(0, curr_h.size(1), device=curr_h.device).unsqueeze(0).repeat(curr_h.size(0), 1)
         
+        # --- Codebook 1 to N Sampling (Decoder Loop) ---
         for i in range(1, self.config.audio_num_codebooks):
             curr_decoder_mask = _index_causal_mask(self.decoder_causal_mask, curr_pos)
             decoder_h = self.decoder(self.projection(curr_h), input_pos=curr_pos, mask=curr_decoder_mask)
             ci_logits = torch.mm(decoder_h[:, -1, :], self.audio_head[i - 1])
             
-            if cfg_scale > 1.0 and b > 1:
-                actual_B = b // 2
-                ci_cond = ci_logits[:actual_B]
-                ci_uncond = ci_logits[actual_B:]
-                guided_ci = ci_uncond + (ci_cond - ci_uncond) * cfg_scale
-                if use_cfg_rescale:
-                    std_c = ci_cond.std(dim=-1, keepdim=True)
-                    std_g = guided_ci.std(dim=-1, keepdim=True)
-                    guided_ci = cfg_rescale_factor * (guided_ci * (std_c / (std_g + 1e-5))) + (1.0 - cfg_rescale_factor) * guided_ci
-                ci_sample = sample_music(guided_ci, topk, topp, min_p, temperature).repeat(2, 1)
-            else:
-                ci_sample = sample_music(ci_logits, topk, topp, min_p, temperature)
+            ci_sample = self._process_logits_and_sample(
+                ci_logits, b, cfg_scale, use_cfg_rescale, cfg_rescale_factor, 
+                topk, topp, min_p, temperature
+            )
             
             ci_embed = self._embed_audio(i, ci_sample)
             curr_h, curr_sample = ci_embed, torch.cat([curr_sample, ci_sample], dim=1)
             curr_pos = curr_pos[:, -1:] + 1
+            
         return curr_sample
 
     def reset_caches(self):

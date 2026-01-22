@@ -83,6 +83,7 @@ class HeartMuLa_Generate:
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 2.0, "step": 0.01}),
                 "cfg_scale": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 15.0, "step": 0.1}),
                 "use_cfg_rescale": ("BOOLEAN", {"default": True}),
+                "cfg_rescale_factor": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "keep_model_loaded": ("BOOLEAN", {"default": True}),
                 "offload_mode": (["auto", "aggressive"], {"default": "auto"}),
             }
@@ -93,7 +94,7 @@ class HeartMuLa_Generate:
     FUNCTION = "generate"
     CATEGORY = "HeartMuLa"
 
-    def generate(self, lyrics, tags, version, seed, max_audio_length_seconds, topk, topp, min_p, temperature, cfg_scale, use_cfg_rescale, keep_model_loaded, offload_mode="auto"):
+    def generate(self, lyrics, tags, version, seed, max_audio_length_seconds, topk, topp, min_p, temperature, cfg_scale, use_cfg_rescale, cfg_rescale_factor, keep_model_loaded, offload_mode="auto"):
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         np.random.seed(seed & 0xFFFFFFFF)
@@ -124,6 +125,7 @@ class HeartMuLa_Generate:
                     temperature=temperature,
                     cfg_scale=cfg_scale,
                     use_cfg_rescale=use_cfg_rescale,
+                    cfg_rescale_factor=cfg_rescale_factor,
                     keep_model_loaded=keep_model_loaded,
                     offload_mode=offload_mode
                 )
