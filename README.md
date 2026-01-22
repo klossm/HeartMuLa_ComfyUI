@@ -1,9 +1,11 @@
 # HeartMuLa_ComfyUI
-ComfyUI Custom Node for HeartMuLa AI Music Generation and Transcript Text
+
+HeartMuLA_ComfyUI is a powerful custom node designed to significantly expand the feature set of ComfyUI, the popular node-based stable diffusion interface. This custom integration focuses on implementing Multi-Attention Latent Alignment, enabling users to achieve precise control over image generation and style transfer. By adding HeartMuLA to your ComfyUI workflow, you gain access to advanced alignment techniques that manipulate the latent space with high accuracy, allowing for the creation of distinct artistic styles and complex visual structures that standard workflows struggle to replicate.
+
+At the core of this implementation is the sophisticated HeartMuLA AI model, which drives the alignment process to refine image outputs with exceptional fidelity. Rephrasing the essential setup instructions, users can easily deploy this AI model by cloning the repository directly into the custom_nodes folder within their ComfyUI directory. This seamless integration eliminates the need for complex manual configurations, allowing you to simply load the node and start utilizing the feature immediately. Whether you are looking to experiment with historical art styles or specific texture synthesis, this custom node bridges the gap between state-of-the-art research and practical, usable tools within the ComfyUI ecosystem.
 
 **HeartMuLa** official GITHUB
 https://github.com/HeartMuLa/heartlib
-
 
 How To Use this In Basic: https://youtu.be/F9LFAeUbBIs
 
