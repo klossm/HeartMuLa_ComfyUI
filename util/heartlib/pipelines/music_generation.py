@@ -1,16 +1,20 @@
-from tokenizers import Tokenizer
-from ..heartmula.modeling_heartmula import HeartMuLa
-from ..heartcodec.modeling_heartcodec import HeartCodec
-import torch
-from typing import Dict, Any, Optional
+import gc
+import json
 import os
 from dataclasses import dataclass
-import comfy.utils
-import torchaudio
+from typing import Any, Dict, Optional
+
 import soundfile as sf
-import json
-import gc
+import torch
+import torchaudio
+from tokenizers import Tokenizer
 from transformers import BitsAndBytesConfig
+
+import comfy.utils
+
+from ..heartcodec.modeling_heartcodec import HeartCodec
+from ..heartmula.modeling_heartmula import HeartMuLa
+
 
 @dataclass
 class HeartMuLaGenConfig:
@@ -56,8 +60,8 @@ class HeartMuLaGenPipeline:
     def load_heartmula(self):
         if self.model is None:
             self.model = HeartMuLa.from_pretrained(
-                self.heartmula_path, 
-                torch_dtype=self.dtype, 
+                self.heartmula_path,
+                torch_dtype=self.dtype,
                 quantization_config=self.bnb_config
             )
         if str(next(self.model.parameters()).device) != str(self.device):
@@ -109,15 +113,26 @@ class HeartMuLaGenPipeline:
             "pos": _cfg_cat(torch.arange(prompt_len, dtype=torch.long, device=self.device)),
         }
 
+    def _get_autocast_context(self):
+        """Get appropriate autocast context for the current device."""
+        if self.device.type == "cuda":
+            return torch.autocast(device_type="cuda", dtype=self.dtype)
+        elif self.device.type == "mps":
+            # MPS has limited bfloat16 support; use inference_mode without autocast
+            # The model is already in float32 for MPS, so no autocast needed
+            return torch.inference_mode()
+        else:
+            return torch.inference_mode()
+
     def _forward(self, model_inputs: Dict[str, Any], max_audio_length_ms: int, temperature: float, topk: int, cfg_scale: float):
         self.load_heartmula()
         self.model.setup_caches(2 if cfg_scale != 1.0 else 1)
-        
+
         frames = []
-        with torch.autocast(device_type="cuda", dtype=self.dtype):
+        with self._get_autocast_context():
             curr_token = self.model.generate_frame(
-                tokens=model_inputs["tokens"], tokens_mask=model_inputs["tokens_mask"], 
-                input_pos=model_inputs["pos"], temperature=temperature, topk=topk, 
+                tokens=model_inputs["tokens"], tokens_mask=model_inputs["tokens_mask"],
+                input_pos=model_inputs["pos"], temperature=temperature, topk=topk,
                 cfg_scale=cfg_scale, continuous_segments=model_inputs["muq_embed"], starts=model_inputs["muq_idx"],
             )
         frames.append(curr_token[0:1,])
@@ -130,7 +145,7 @@ class HeartMuLaGenPipeline:
             padded_token = padded_token.unsqueeze(1)
             padded_token_mask = torch.ones_like(padded_token, dtype=torch.bool); padded_token_mask[..., -1] = False
 
-            with torch.autocast(device_type="cuda", dtype=self.dtype):
+            with self._get_autocast_context():
                 curr_token = self.model.generate_frame(
                     tokens=padded_token, tokens_mask=padded_token_mask,
                     input_pos=model_inputs["pos"][..., -1:] + i + 1,
@@ -139,29 +154,42 @@ class HeartMuLaGenPipeline:
             pbar.update(1)
             if torch.any(curr_token[0:1, :] >= self.config.audio_eos_id): break
             frames.append(curr_token[0:1,])
-        
+
         return torch.stack(frames).permute(1, 2, 0).squeeze(0).cpu()
+
+    def _empty_cache(self):
+        """Empty GPU cache for the appropriate device."""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # MPS doesn't have an equivalent empty_cache, memory is managed automatically
+
+    def _synchronize(self):
+        """Synchronize device operations."""
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elif self.device.type == "mps":
+            torch.mps.synchronize()
 
     def postprocess(self, frames: torch.Tensor, save_path: str, keep_model_loaded: bool, offload_mode: str = "auto"):
         if offload_mode == "aggressive":
             if self.model is not None:
                 del self.model
                 self.model = None
-            torch.cuda.empty_cache()
+            self._empty_cache()
             gc.collect()
-            torch.cuda.synchronize()
+            self._synchronize()
         else:
             if self.model is not None:
                 self.model.to("cpu")
-                torch.cuda.empty_cache()
+                self._empty_cache()
                 gc.collect()
 
         try:
             self.load_heartcodec()
             with torch.inference_mode():
-                wav = self.audio_codec.detokenize(frames.to(self.device))
+                wav = self.audio_codec.detokenize(frames.to(self.device), device=self.device)
                 wav = wav.detach().cpu().float()
-            
+
             try:
                 torchaudio.save(save_path, wav, 48000)
             except Exception:
@@ -174,7 +202,7 @@ class HeartMuLaGenPipeline:
                 del self.audio_codec
                 self.audio_codec = None
 
-            torch.cuda.empty_cache()
+            self._empty_cache()
             gc.collect()
 
             if keep_model_loaded and offload_mode != "aggressive":
@@ -184,7 +212,7 @@ class HeartMuLaGenPipeline:
                 if self.model is not None:
                     del self.model
                     self.model = None
-            torch.cuda.empty_cache()
+            self._empty_cache()
 
     def __call__(self, inputs: Dict[str, Any], **kwargs):
         keep_model_loaded = kwargs.get("keep_model_loaded", True)

@@ -1,15 +1,17 @@
+import gc
+import logging
 import os
 import sys
+import uuid
+import warnings
+
+import numpy as np
+import soundfile as sf
 import torch
 import torchaudio
-import soundfile as sf
-import numpy as np
-import uuid
-import gc
-import folder_paths
-import logging
-import warnings
 from transformers import BitsAndBytesConfig
+
+import folder_paths
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -34,11 +36,25 @@ def get_model_base_dir():
 
 MODEL_BASE_DIR = get_model_base_dir()
 
+def _get_device():
+    """Get the best available device: CUDA > MPS > CPU"""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+def _get_dtype(device: torch.device):
+    """Get the appropriate dtype for the device. MPS has limited bfloat16 support."""
+    if device.type == "mps":
+        return torch.float32  # MPS bfloat16 causes dtype mismatches in linear layers
+    return torch.bfloat16
+
 class HeartMuLaModelManager:
     _instance = None
     _gen_pipes = {}
-    _transcribe_pipe = None 
-    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _transcribe_pipe = None
+    _device = _get_device()
 
     def __new__(cls):
         if cls._instance is None:
@@ -49,11 +65,15 @@ class HeartMuLaModelManager:
         key = (version, quantize_4bit)
         if key not in self._gen_pipes:
             from heartlib import HeartMuLaGenPipeline
-            
+
+            model_dtype = _get_dtype(self._device)
+
             bnb_config = None
             if quantize_4bit:
-                quant_type = "nf4"
-                if torch.cuda.is_available():
+                if self._device.type != "cuda":
+                    print(f"HeartMuLa: 4-bit quantization requires CUDA. Ignoring quantize_4bit on {self._device.type}.")
+                else:
+                    quant_type = "nf4"
                     try:
                         major, _ = torch.cuda.get_device_capability()
                         if major >= 10:
@@ -62,22 +82,24 @@ class HeartMuLaModelManager:
                     except:
                         pass
 
-                bnb_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type=quant_type,
-                    bnb_4bit_compute_dtype=torch.bfloat16,
-                    bnb_4bit_use_double_quant=True,
-                )
+                    bnb_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type=quant_type,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_use_double_quant=True,
+                    )
 
+            print(f"HeartMuLa: Loading model on {self._device} with dtype {model_dtype}")
             self._gen_pipes[key] = HeartMuLaGenPipeline.from_pretrained(
                 MODEL_BASE_DIR,
                 device=self._device,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=model_dtype,
                 version=version,
                 lazy_load=True,
                 bnb_config=bnb_config
             )
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             gc.collect()
         return self._gen_pipes[key]
 
@@ -87,7 +109,8 @@ class HeartMuLaModelManager:
             self._transcribe_pipe = HeartTranscriptorPipeline.from_pretrained(
                 MODEL_BASE_DIR, device=self._device, dtype=torch.float16,
             )
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             gc.collect()
         return self._transcribe_pipe
 
@@ -117,7 +140,8 @@ class HeartMuLa_Generate:
 
     def generate(self, lyrics, tags, version, seed, max_audio_length_seconds, topk, temperature, cfg_scale, keep_model_loaded, offload_mode="auto", quantize_4bit=False):
         torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
         np.random.seed(seed & 0xFFFFFFFF)
 
         max_audio_length_ms = int(max_audio_length_seconds * 1000)
@@ -146,7 +170,8 @@ class HeartMuLa_Generate:
             print(f"Generation failed: {e}")
             raise e
         finally:
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             gc.collect()
 
         try:
@@ -192,17 +217,17 @@ class HeartMuLa_Transcribe:
             sr, waveform = audio_input
             if isinstance(waveform, np.ndarray):
                  waveform = torch.from_numpy(waveform)
-        
+
         if waveform.ndim == 3:
             waveform = waveform.squeeze(0)
         elif waveform.ndim == 1:
             waveform = waveform.unsqueeze(0)
-        
+
         waveform = waveform.to(torch.float32).cpu()
         output_dir = folder_paths.get_temp_directory()
         os.makedirs(output_dir, exist_ok=True)
         temp_path = os.path.join(output_dir, f"hm_trans_{uuid.uuid4().hex}.wav")
-        
+
         wav_np = waveform.numpy()
         if wav_np.ndim == 2:
             wav_np = wav_np.T
@@ -228,7 +253,8 @@ class HeartMuLa_Transcribe:
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             gc.collect()
 
         text = result if isinstance(result, str) else result.get("text", str(result))
