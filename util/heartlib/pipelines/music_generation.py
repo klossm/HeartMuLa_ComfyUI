@@ -2,6 +2,7 @@ from tokenizers import Tokenizer
 from ..heartmula.modeling_heartmula import HeartMuLa
 from ..heartcodec.modeling_heartcodec import HeartCodec
 import torch
+import torch.nn.functional as F
 from typing import Dict, Any, Optional
 import os
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ import torchaudio
 import soundfile as sf
 import json
 import gc
+import math
 from transformers import BitsAndBytesConfig
 
 @dataclass
@@ -109,22 +111,34 @@ class HeartMuLaGenPipeline:
             "pos": _cfg_cat(torch.arange(prompt_len, dtype=torch.long, device=self.device)),
         }
 
-    def _forward(self, model_inputs: Dict[str, Any], max_audio_length_ms: int, temperature: float, topk: int, cfg_scale: float):
+    def _forward(self, model_inputs: Dict[str, Any], max_audio_length_ms: int, temperature: float, topk: int, topp: float, cfg_scale: float, use_cfg_rescale: bool = True, min_p: float = 0.05):
         self.load_heartmula()
         self.model.setup_caches(2 if cfg_scale != 1.0 else 1)
         
         frames = []
+        max_frames = max_audio_length_ms // 80
+        pbar = comfy.utils.ProgressBar(max_frames)
+        
+        start_cfg = cfg_scale
+        min_cfg = 1.2 if cfg_scale > 1.2 else cfg_scale
+
         with torch.autocast(device_type="cuda", dtype=self.dtype):
             curr_token = self.model.generate_frame(
                 tokens=model_inputs["tokens"], tokens_mask=model_inputs["tokens_mask"], 
-                input_pos=model_inputs["pos"], temperature=temperature, topk=topk, 
-                cfg_scale=cfg_scale, continuous_segments=model_inputs["muq_embed"], starts=model_inputs["muq_idx"],
+                input_pos=model_inputs["pos"], temperature=temperature, topk=topk, topp=topp,
+                cfg_scale=start_cfg, 
+                use_cfg_rescale=use_cfg_rescale,
+                cfg_rescale_factor=0.7,
+                min_p=min_p,
+                continuous_segments=model_inputs["muq_embed"], starts=model_inputs["muq_idx"],
             )
         frames.append(curr_token[0:1,])
 
-        max_frames = max_audio_length_ms // 80
-        pbar = comfy.utils.ProgressBar(max_frames)
         for i in range(max_frames):
+            decay_progress = min(1.0, i / max_frames)
+            cosine_factor = 0.5 * (1 + math.cos(math.pi * decay_progress))
+            current_cfg = min_cfg + (start_cfg - min_cfg) * cosine_factor if cfg_scale > 1.0 else 1.0
+
             padded_token = (torch.ones((curr_token.shape[0], self._parallel_number), device=self.device, dtype=torch.long) * self.config.empty_id)
             padded_token[:, :-1] = curr_token
             padded_token = padded_token.unsqueeze(1)
@@ -134,8 +148,13 @@ class HeartMuLaGenPipeline:
                 curr_token = self.model.generate_frame(
                     tokens=padded_token, tokens_mask=padded_token_mask,
                     input_pos=model_inputs["pos"][..., -1:] + i + 1,
-                    temperature=temperature, topk=topk, cfg_scale=cfg_scale,
+                    temperature=temperature, topk=topk, topp=topp, 
+                    cfg_scale=current_cfg,
+                    use_cfg_rescale=use_cfg_rescale,
+                    cfg_rescale_factor=0.7,
+                    min_p=min_p,
                 )
+            
             pbar.update(1)
             if torch.any(curr_token[0:1, :] >= self.config.audio_eos_id): break
             frames.append(curr_token[0:1,])
@@ -189,12 +208,18 @@ class HeartMuLaGenPipeline:
     def __call__(self, inputs: Dict[str, Any], **kwargs):
         keep_model_loaded = kwargs.get("keep_model_loaded", True)
         offload_mode = kwargs.get("offload_mode", "auto")
+        use_cfg_rescale = kwargs.get("use_cfg_rescale", True)
+        min_p = kwargs.get("min_p", 0.05)
+        
         model_inputs = self.preprocess(inputs, cfg_scale=kwargs.get("cfg_scale", 1.5))
         frames = self._forward(model_inputs,
                                max_audio_length_ms=kwargs.get("max_audio_length_ms", 120000),
                                temperature=kwargs.get("temperature", 1.0),
                                topk=kwargs.get("topk", 50),
-                               cfg_scale=kwargs.get("cfg_scale", 1.5))
+                               topp=kwargs.get("topp", 0.85),
+                               cfg_scale=kwargs.get("cfg_scale", 1.5),
+                               use_cfg_rescale=use_cfg_rescale,
+                               min_p=min_p)
         self.postprocess(frames, kwargs.get("save_path", "out.wav"), keep_model_loaded, offload_mode)
 
     @classmethod

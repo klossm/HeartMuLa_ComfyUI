@@ -1,2 +1,21 @@
-"__pycache__/" 
-"__pycache__/" 
+# Python bytecode (the cache folder you mentioned)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Models and Checkpoints (Avoid uploading huge files)
+util/heartlib/ckpt/
+*.ckpt
+*.safetensors
+*.bin
+*.pth
+
+# Output files
+benchmark_out.wav
+benchmark_*_20s.wav
+timeline_*.csv
+output/
+
+# OS files
+.DS_Store
+Thumbs.db
