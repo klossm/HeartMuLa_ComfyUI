@@ -1,3 +1,4 @@
+import soundfile as sf
 from tokenizers import Tokenizer
 from ..heartmula.modeling_heartmula import HeartMuLa
 from ..heartcodec.modeling_heartcodec import HeartCodec
@@ -6,7 +7,6 @@ from typing import Dict, Any, Optional
 import os
 from dataclasses import dataclass
 from tqdm import tqdm
-import torchaudio
 import json
 import gc
 from transformers import BitsAndBytesConfig
@@ -145,7 +145,7 @@ class HeartMuLaGenPipeline:
             with torch.inference_mode():
                 wav = self.audio_codec.detokenize(frames.to(self.device))
                 wav = wav.detach().cpu().float()
-            torchaudio.save(save_path, wav, 48000)
+            sf.write(save_path, wav.t().numpy(), 48000)
         finally:
             if hasattr(self, 'audio_codec'):
                 del self.audio_codec
@@ -178,6 +178,9 @@ class HeartMuLaGenPipeline:
     def from_pretrained(cls, pretrained_path: str, device: torch.device, dtype: torch.dtype, version: str, bnb_config=None, lazy_load=True):
         heartcodec_path = os.path.join(pretrained_path, "HeartCodec-oss")
         heartmula_path = os.path.join(pretrained_path, f"HeartMuLa-oss-{version}")
-        tokenizer = Tokenizer.from_file(os.path.join(pretrained_path, "tokenizer.json"))
+        print(f"pretrained_path: {pretrained_path}")
+        tokenizer_path = os.path.join(pretrained_path, "tokenizer.json")
+        print(f"Loading tokenizer from: {tokenizer_path}")
+        tokenizer = Tokenizer.from_file(tokenizer_path)
         gen_config = HeartMuLaGenConfig.from_file(os.path.join(pretrained_path, "gen_config.json"))
         return cls(None, None, None, tokenizer, gen_config, device, dtype, heartmula_path, heartcodec_path, bnb_config)
