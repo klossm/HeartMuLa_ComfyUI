@@ -78,11 +78,12 @@ class HeartMuLa_Generate:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "max_audio_length_seconds": ("INT", {"default": 240, "min": 10, "max": 600, "step": 1}),
                 "topk": ("INT", {"default": 50, "min": 0, "max": 250, "step": 1}),
-                "topp": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "min_p": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "topp": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "min_p": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 2.0, "step": 0.01}),
-                "cfg_scale": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 15.0, "step": 0.1}),
-                "use_cfg_rescale": ("BOOLEAN", {"default": True}),
+                "cfg_scale": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 15.0, "step": 0.1}),
+                "dynamic_cfg": ("BOOLEAN", {"default": False}),
+                "use_cfg_rescale": ("BOOLEAN", {"default": False}),
                 "cfg_rescale_factor": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "keep_model_loaded": ("BOOLEAN", {"default": True}),
                 "offload_mode": (["auto", "aggressive"], {"default": "auto"}),
@@ -94,14 +95,13 @@ class HeartMuLa_Generate:
     FUNCTION = "generate"
     CATEGORY = "HeartMuLa"
 
-    def generate(self, lyrics, tags, version, seed, max_audio_length_seconds, topk, topp, min_p, temperature, cfg_scale, use_cfg_rescale, cfg_rescale_factor, keep_model_loaded, offload_mode="auto"):
+    def generate(self, lyrics, tags, version, seed, max_audio_length_seconds, topk, topp, min_p, temperature, cfg_scale, dynamic_cfg, use_cfg_rescale, cfg_rescale_factor, keep_model_loaded, offload_mode="auto"):
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         np.random.seed(seed & 0xFFFFFFFF)
 
         max_audio_length_ms = int(max_audio_length_seconds * 1000)
 
-        # Apply sampling logic
         current_topk = topk if topk > 0 else 0
         current_topp = topp if (topp > 0 and topp < 1.0) else 1.0
 
@@ -124,6 +124,7 @@ class HeartMuLa_Generate:
                     min_p=min_p,
                     temperature=temperature,
                     cfg_scale=cfg_scale,
+                    dynamic_cfg=dynamic_cfg,
                     use_cfg_rescale=use_cfg_rescale,
                     cfg_rescale_factor=cfg_rescale_factor,
                     keep_model_loaded=keep_model_loaded,

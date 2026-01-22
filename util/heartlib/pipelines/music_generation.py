@@ -1,18 +1,21 @@
-from tokenizers import Tokenizer
-from ..heartmula.modeling_heartmula import HeartMuLa
-from ..heartcodec.modeling_heartcodec import HeartCodec
-import torch
-import torch.nn.functional as F
-from typing import Dict, Any, Optional
-import os
-from dataclasses import dataclass
-import comfy.utils
-import torchaudio
-import soundfile as sf
-import json
 import gc
+import json
+import os
 import math
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+import soundfile as sf
+import torch
+import torchaudio
+from tokenizers import Tokenizer
 from transformers import BitsAndBytesConfig
+
+import comfy.utils
+
+from ..heartcodec.modeling_heartcodec import HeartCodec
+from ..heartmula.modeling_heartmula import HeartMuLa
+
 
 @dataclass
 class HeartMuLaGenConfig:
@@ -58,8 +61,8 @@ class HeartMuLaGenPipeline:
     def load_heartmula(self):
         if self.model is None:
             self.model = HeartMuLa.from_pretrained(
-                self.heartmula_path, 
-                torch_dtype=self.dtype, 
+                self.heartmula_path,
+                torch_dtype=self.dtype,
                 quantization_config=self.bnb_config
             )
         if str(next(self.model.parameters()).device) != str(self.device):
@@ -111,76 +114,88 @@ class HeartMuLaGenPipeline:
             "pos": _cfg_cat(torch.arange(prompt_len, dtype=torch.long, device=self.device)),
         }
 
-    def _forward(self, model_inputs: Dict[str, Any], max_audio_length_ms: int, temperature: float, topk: int, topp: float, cfg_scale: float, use_cfg_rescale: bool = True, cfg_rescale_factor: float = 0.7, min_p: float = 0.05):
+    def _get_autocast_context(self):
+        if self.device.type == "cuda":
+            return torch.autocast(device_type="cuda", dtype=self.dtype)
+        else:
+            return torch.inference_mode()
+
+    def _forward(self, model_inputs: Dict[str, Any], max_audio_length_ms: int, temperature: float, topk: int, topp: float, cfg_scale: float, use_cfg_rescale: bool = False, cfg_rescale_factor: float = 0.7, min_p: float = 0.0, dynamic_cfg: bool = False):
         self.load_heartmula()
         self.model.setup_caches(2 if cfg_scale != 1.0 else 1)
-        
+
         frames = []
-        max_frames = max_audio_length_ms // 80
-        pbar = comfy.utils.ProgressBar(max_frames)
-        
         start_cfg = cfg_scale
         min_cfg = 1.2 if cfg_scale > 1.2 else cfg_scale
-
-        with torch.autocast(device_type="cuda", dtype=self.dtype):
+        
+        with self._get_autocast_context():
             curr_token = self.model.generate_frame(
-                tokens=model_inputs["tokens"], tokens_mask=model_inputs["tokens_mask"], 
+                tokens=model_inputs["tokens"], tokens_mask=model_inputs["tokens_mask"],
                 input_pos=model_inputs["pos"], temperature=temperature, topk=topk, topp=topp,
-                cfg_scale=start_cfg, 
-                use_cfg_rescale=use_cfg_rescale,
-                cfg_rescale_factor=cfg_rescale_factor,
-                min_p=min_p,
-                continuous_segments=model_inputs["muq_embed"], starts=model_inputs["muq_idx"],
+                cfg_scale=start_cfg, use_cfg_rescale=use_cfg_rescale, cfg_rescale_factor=cfg_rescale_factor,
+                min_p=min_p, continuous_segments=model_inputs["muq_embed"], starts=model_inputs["muq_idx"],
             )
         frames.append(curr_token[0:1,])
 
+        max_frames = max_audio_length_ms // 80
+        pbar = comfy.utils.ProgressBar(max_frames)
         for i in range(max_frames):
-            decay_progress = min(1.0, i / max_frames)
-            cosine_factor = 0.5 * (1 + math.cos(math.pi * decay_progress))
-            current_cfg = min_cfg + (start_cfg - min_cfg) * cosine_factor if cfg_scale > 1.0 else 1.0
+            if dynamic_cfg and cfg_scale > 1.0:
+                decay_progress = min(1.0, i / max_frames)
+                cosine_factor = 0.5 * (1 + math.cos(math.pi * decay_progress))
+                current_cfg = min_cfg + (start_cfg - min_cfg) * cosine_factor
+            else:
+                current_cfg = start_cfg
 
             padded_token = (torch.ones((curr_token.shape[0], self._parallel_number), device=self.device, dtype=torch.long) * self.config.empty_id)
             padded_token[:, :-1] = curr_token
             padded_token = padded_token.unsqueeze(1)
             padded_token_mask = torch.ones_like(padded_token, dtype=torch.bool); padded_token_mask[..., -1] = False
 
-            with torch.autocast(device_type="cuda", dtype=self.dtype):
+            with self._get_autocast_context():
                 curr_token = self.model.generate_frame(
                     tokens=padded_token, tokens_mask=padded_token_mask,
                     input_pos=model_inputs["pos"][..., -1:] + i + 1,
-                    temperature=temperature, topk=topk, topp=topp, 
-                    cfg_scale=current_cfg,
-                    use_cfg_rescale=use_cfg_rescale,
-                    cfg_rescale_factor=cfg_rescale_factor,
+                    temperature=temperature, topk=topk, topp=topp, cfg_scale=current_cfg,
+                    use_cfg_rescale=use_cfg_rescale, cfg_rescale_factor=cfg_rescale_factor,
                     min_p=min_p,
                 )
-            
             pbar.update(1)
             if torch.any(curr_token[0:1, :] >= self.config.audio_eos_id): break
             frames.append(curr_token[0:1,])
-        
+
         return torch.stack(frames).permute(1, 2, 0).squeeze(0).cpu()
+
+    def _empty_cache(self):
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _synchronize(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elif self.device.type == "mps":
+            torch.mps.synchronize()
 
     def postprocess(self, frames: torch.Tensor, save_path: str, keep_model_loaded: bool, offload_mode: str = "auto"):
         if offload_mode == "aggressive":
             if self.model is not None:
                 del self.model
                 self.model = None
-            torch.cuda.empty_cache()
+            self._empty_cache()
             gc.collect()
-            torch.cuda.synchronize()
+            self._synchronize()
         else:
             if self.model is not None:
                 self.model.to("cpu")
-                torch.cuda.empty_cache()
+                self._empty_cache()
                 gc.collect()
 
         try:
             self.load_heartcodec()
             with torch.inference_mode():
-                wav = self.audio_codec.detokenize(frames.to(self.device))
+                wav = self.audio_codec.detokenize(frames.to(self.device), device=self.device)
                 wav = wav.detach().cpu().float()
-            
+
             try:
                 torchaudio.save(save_path, wav, 48000)
             except Exception:
@@ -193,7 +208,7 @@ class HeartMuLaGenPipeline:
                 del self.audio_codec
                 self.audio_codec = None
 
-            torch.cuda.empty_cache()
+            self._empty_cache()
             gc.collect()
 
             if keep_model_loaded and offload_mode != "aggressive":
@@ -203,25 +218,27 @@ class HeartMuLaGenPipeline:
                 if self.model is not None:
                     del self.model
                     self.model = None
-            torch.cuda.empty_cache()
+            self._empty_cache()
 
     def __call__(self, inputs: Dict[str, Any], **kwargs):
         keep_model_loaded = kwargs.get("keep_model_loaded", True)
         offload_mode = kwargs.get("offload_mode", "auto")
-        use_cfg_rescale = kwargs.get("use_cfg_rescale", True)
+        use_cfg_rescale = kwargs.get("use_cfg_rescale", False)
         cfg_rescale_factor = kwargs.get("cfg_rescale_factor", 0.7)
-        min_p = kwargs.get("min_p", 0.05)
+        min_p = kwargs.get("min_p", 0.0)
+        dynamic_cfg = kwargs.get("dynamic_cfg", False)
         
         model_inputs = self.preprocess(inputs, cfg_scale=kwargs.get("cfg_scale", 1.5))
         frames = self._forward(model_inputs,
                                max_audio_length_ms=kwargs.get("max_audio_length_ms", 120000),
                                temperature=kwargs.get("temperature", 1.0),
                                topk=kwargs.get("topk", 50),
-                               topp=kwargs.get("topp", 0.85),
+                               topp=kwargs.get("topp", 1.0),
                                cfg_scale=kwargs.get("cfg_scale", 1.5),
                                use_cfg_rescale=use_cfg_rescale,
                                cfg_rescale_factor=cfg_rescale_factor,
-                               min_p=min_p)
+                               min_p=min_p,
+                               dynamic_cfg=dynamic_cfg)
         self.postprocess(frames, kwargs.get("save_path", "out.wav"), keep_model_loaded, offload_mode)
 
     @classmethod
