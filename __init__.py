@@ -43,19 +43,22 @@ class HeartMuLaModelManager:
             cls._instance = super(HeartMuLaModelManager, cls).__new__(cls)
         return cls._instance
 
-    def get_gen_pipeline(self, version="3B"):
-        if version not in self._gen_pipes:
+    def get_gen_pipeline(self, version="3B", codec_version="oss"):
+        # 缓存键名包含 version 和 codec_version 确保切换时不冲突
+        cache_key = f"{version}_{codec_version}"
+        if cache_key not in self._gen_pipes:
             from heartlib import HeartMuLaGenPipeline
-            self._gen_pipes[version] = HeartMuLaGenPipeline.from_pretrained(
+            self._gen_pipes[cache_key] = HeartMuLaGenPipeline.from_pretrained(
                 MODEL_BASE_DIR,
                 device=self._device,
                 torch_dtype=torch.bfloat16,
                 version=version,
+                codec_version=codec_version,
                 lazy_load=True
             )
             torch.cuda.empty_cache()
             gc.collect()
-        return self._gen_pipes[version]
+        return self._gen_pipes[cache_key]
 
     def get_transcribe_pipeline(self):
         if self._transcribe_pipe is None:
@@ -74,7 +77,8 @@ class HeartMuLa_Generate:
             "required": {
                 "lyrics": ("STRING", {"multiline": True, "placeholder": "[Verse]\n..."}),
                 "tags": ("STRING", {"multiline": True, "placeholder": "piano,happy,wedding"}),
-                "version": (["3B", "7B"], {"default": "3B"}),
+                "version": (["3B", "7B", "RL-oss-3B-20260123"], {"default": "3B"}),
+                "codec_version": (["oss", "oss-20260123"], {"default": "oss"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "max_audio_length_seconds": ("INT", {"default": 240, "min": 10, "max": 600, "step": 1}),
                 "topk": ("INT", {"default": 50, "min": 0, "max": 250, "step": 1}),
@@ -82,9 +86,6 @@ class HeartMuLa_Generate:
                 "min_p": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 2.0, "step": 0.01}),
                 "cfg_scale": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 15.0, "step": 0.1}),
-                "dynamic_cfg": ("BOOLEAN", {"default": False}),
-                "use_cfg_rescale": ("BOOLEAN", {"default": False}),
-                "cfg_rescale_factor": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "keep_model_loaded": ("BOOLEAN", {"default": True}),
                 "offload_mode": (["auto", "aggressive"], {"default": "auto"}),
             }
@@ -95,7 +96,7 @@ class HeartMuLa_Generate:
     FUNCTION = "generate"
     CATEGORY = "HeartMuLa"
 
-    def generate(self, lyrics, tags, version, seed, max_audio_length_seconds, topk, topp, min_p, temperature, cfg_scale, dynamic_cfg, use_cfg_rescale, cfg_rescale_factor, keep_model_loaded, offload_mode="auto"):
+    def generate(self, lyrics, tags, version, codec_version, seed, max_audio_length_seconds, topk, topp, min_p, temperature, cfg_scale, keep_model_loaded, offload_mode="auto"):
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         np.random.seed(seed & 0xFFFFFFFF)
@@ -106,7 +107,7 @@ class HeartMuLa_Generate:
         current_topp = topp if (topp > 0 and topp < 1.0) else 1.0
 
         manager = HeartMuLaModelManager()
-        pipe = manager.get_gen_pipeline(version)
+        pipe = manager.get_gen_pipeline(version, codec_version)
 
         output_dir = folder_paths.get_output_directory()
         os.makedirs(output_dir, exist_ok=True)
@@ -124,9 +125,6 @@ class HeartMuLa_Generate:
                     min_p=min_p,
                     temperature=temperature,
                     cfg_scale=cfg_scale,
-                    dynamic_cfg=dynamic_cfg,
-                    use_cfg_rescale=use_cfg_rescale,
-                    cfg_rescale_factor=cfg_rescale_factor,
                     keep_model_loaded=keep_model_loaded,
                     offload_mode=offload_mode
                 )
