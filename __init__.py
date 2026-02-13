@@ -104,6 +104,7 @@ class HeartMuLaModelManager:
                         bnb_4bit_quant_type=quant_type,
                         bnb_4bit_compute_dtype=torch.bfloat16,
                         bnb_4bit_use_double_quant=True,
+                        bnb_4bit_use_double_quant_compute_dtype=torch.bfloat16,
                     )
 
             self._gen_pipes[key] = HeartMuLaGenPipeline.from_pretrained(
@@ -138,8 +139,8 @@ class HeartMuLa_Generate:
             "required": {
                 "lyrics": ("STRING", {"multiline": True, "placeholder": "[Verse]\n..."}),
                 "tags": ("STRING", {"multiline": True, "placeholder": "piano,happy,wedding"}),
-                "version": (["3B", "7B", "RL-oss-3B-20260123"], {"default": "3B"}),
-                "codec_version": (["oss", "oss-20260123"], {"default": "oss"}),
+                "version": (["3B", "7B", "RL-oss-3B-20260123", "oss-3B-happy-new-year"], {"default": "3B"}),
+                "codec_version": (["oss", "oss-20260123", "none"], {"default": "oss"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "max_audio_length_seconds": ("INT", {"default": 240, "min": 10, "max": 600, "step": 1}),
                 "topk": ("INT", {"default": 50, "min": 1, "max": 250, "step": 1}),
@@ -161,6 +162,10 @@ class HeartMuLa_Generate:
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
         np.random.seed(seed & 0xFFFFFFFF)
+
+        if version == "oss-3B-happy-new-year":
+            version = "3B-happy-new-year"
+            codec_version = "oss"
 
         max_audio_length_ms = int(max_audio_length_seconds * 1000)
         manager = HeartMuLaModelManager()
@@ -262,6 +267,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "HeartMuLa_Generate": "HeartMuLa Music Generator",
     "HeartMuLa_Transcribe": "HeartMuLa Lyrics Transcriber",
 }
-
 
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
